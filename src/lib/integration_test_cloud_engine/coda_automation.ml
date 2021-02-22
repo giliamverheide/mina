@@ -69,6 +69,7 @@ module Network_config = struct
     ; runtime_config: Yojson.Safe.t
           [@to_yojson fun j -> `String (Yojson.Safe.to_string j)]
     ; block_producer_configs: block_producer_config list
+    ; archive_node_count: int
     ; snark_worker_replicas: int
     ; snark_worker_fee: string
     ; snark_worker_public_key: string }
@@ -98,6 +99,7 @@ module Network_config = struct
         ; txpool_max_size
         ; block_producers
         ; num_snark_workers
+        ; num_archive_nodes
         ; snark_worker_fee
         ; snark_worker_public_key } =
       test_config
@@ -198,7 +200,9 @@ module Network_config = struct
             ; slots_per_sub_window= Some slots_per_sub_window
             ; genesis_state_timestamp=
                 Some Core.Time.(to_string_abs ~zone:Zone.utc (now ())) }
-      ; proof= Some proof_config (* TODO: prebake ledger and only set hash *)
+      ; proof=
+          None
+          (* was: Some proof_config; TODO: prebake ledger and only set hash *)
       ; ledger=
           Some
             { base= Accounts runtime_accounts
@@ -243,6 +247,7 @@ module Network_config = struct
         ; runtime_config= Runtime_config.to_yojson runtime_config
         ; block_producer_configs=
             List.mapi block_producer_keypairs ~f:block_producer_config
+        ; archive_node_count= num_archive_nodes
         ; snark_worker_replicas= num_snark_workers
         ; snark_worker_public_key
         ; snark_worker_fee } }
@@ -301,6 +306,7 @@ module Network_manager = struct
     ; seed_nodes: Kubernetes_network.Node.t list
     ; block_producer_nodes: Kubernetes_network.Node.t list
     ; snark_coordinator_nodes: Kubernetes_network.Node.t list
+    ; archive_nodes: Kubernetes_network.Node.t list
     ; nodes_by_app_id: Kubernetes_network.Node.t String.Map.t
     ; mutable deployed: bool
     ; keypairs: Keypair.t list }
@@ -369,15 +375,22 @@ module Network_manager = struct
     (* we currently only deploy 1 seed and coordinator per deploy (will be configurable later) *)
     let seed_nodes = [cons_node "seed" 3085] in
     let snark_coordinator_nodes = [cons_node "snark-coordinator-1" 3085] in
+    let num_block_producers =
+      List.length network_config.terraform.block_producer_configs
+    in
     let block_producer_nodes =
-      List.init (List.length network_config.terraform.block_producer_configs)
-        ~f:(fun i ->
-          cons_node (Printf.sprintf "test-block-producer-%d" (i + 1)) (i + 3086)
-      )
+      List.init num_block_producers ~f:(fun i ->
+          cons_node (sprintf "test-block-producer-%d" (i + 1)) (i + 3086) )
+    in
+    let archive_nodes =
+      List.init network_config.terraform.archive_node_count ~f:(fun i ->
+          cons_node
+            (sprintf "archive-node-%d" (i + 1))
+            (i + 3086 + num_block_producers) )
     in
     let nodes_by_app_id =
       let all_nodes =
-        seed_nodes @ snark_coordinator_nodes @ block_producer_nodes
+        seed_nodes @ snark_coordinator_nodes @ block_producer_nodes @ archive_nodes
       in
       all_nodes
       |> List.map ~f:(fun node -> (node.pod_id, node))
@@ -393,6 +406,7 @@ module Network_manager = struct
       ; seed_nodes
       ; block_producer_nodes
       ; snark_coordinator_nodes
+      ; archive_nodes
       ; nodes_by_app_id
       ; deployed= false
       ; keypairs=
@@ -413,7 +427,7 @@ module Network_manager = struct
       ; constants= t.constants
       ; block_producers= t.block_producer_nodes
       ; snark_coordinators= t.snark_coordinator_nodes
-      ; archive_nodes= []
+      ; archive_nodes= t.archive_nodes
       ; nodes_by_app_id= t.nodes_by_app_id
       ; testnet_log_filter= t.testnet_log_filter
       ; keypairs= t.keypairs }
@@ -423,8 +437,6 @@ module Network_manager = struct
       (Kubernetes_network.Node.node_list_to_string result.snark_coordinators) ;
     [%log' info t.logger] "block_producers_list: %s"
       (Kubernetes_network.Node.node_list_to_string result.block_producers) ;
-    [%log' info t.logger] "archive_nodes_list: %s"
-      (Kubernetes_network.Node.node_list_to_string result.archive_nodes) ;
     result
 
   let destroy t =

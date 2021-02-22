@@ -36,7 +36,7 @@ module "kubernetes_testnet" {
     }
   ]
 
-  archive_node_count  = 0
+  archive_node_count  = var.archive_node_count
 
   snark_worker_replicas   = var.snark_worker_replicas
   snark_worker_fee        = var.snark_worker_fee
