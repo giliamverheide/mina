@@ -22,7 +22,7 @@ trap cleanup INT
 PG_CONN=postgres://$USER:$USER@localhost:5432/archiver
 
 # Start postgres
-pg_ctlcluster 11 main start
+# pg_ctlcluster 11 main start
 
 # wait for it to settle
 sleep 3
@@ -38,7 +38,7 @@ MINA_CONFIG_DIR=/root/.coda-config
 
 
 # archive
-/mina-bin/archive/archive.exe run \
+/home/opam/app/archive/archive.exe run \
   -postgres-uri $PG_CONN \
   -log-json \
   -config-file "$MINA_CONFIG_DIR/daemon.json" \
@@ -48,7 +48,7 @@ MINA_CONFIG_DIR=/root/.coda-config
 sleep 3
 
 # MINA_CONFIG_DIR is exposed by the dockerfile and contains demo mode essentials
-/mina-bin/cli/src/coda.exe daemon \
+/home/opam/app/cli/src/coda.exe daemon \
   -seed \
   -demo-mode \
   -block-producer-key "MINA_CONFIG_DIR/wallets/store/$PK" \
@@ -66,7 +66,7 @@ sleep 3
 sleep 3
 
 # rosetta
-/mina-bin/rosetta/rosetta.exe \
+/home/opam/app/rosetta/rosetta.exe \
   -archive-uri $PG_CONN \
   -graphql-uri http://localhost:3085/graphql \
   -log-level debug \
@@ -77,7 +77,7 @@ sleep 3
 sleep 3
 
 # test agent
-/mina-bin/rosetta/test-agent/agent.exe \
+/home/opam/app/rosetta/test-agent/agent.exe \
   -graphql-uri http://localhost:3085/graphql \
   -rosetta-uri http://localhost:3087/ \
   -log-level Trace \
