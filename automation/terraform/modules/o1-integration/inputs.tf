@@ -58,6 +58,10 @@ variable "archive_node_count" {
   type = number
 }
 
+variable "mina_archive_schema" {
+  type = string
+}
+
 variable "block_producer_configs" {
   type = list(
     object({

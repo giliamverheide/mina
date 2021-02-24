@@ -37,6 +37,7 @@ module "kubernetes_testnet" {
   ]
 
   archive_node_count  = var.archive_node_count
+  mina_archive_schema  = var.mina_archive_schema
 
   snark_worker_replicas   = var.snark_worker_replicas
   snark_worker_fee        = var.snark_worker_fee

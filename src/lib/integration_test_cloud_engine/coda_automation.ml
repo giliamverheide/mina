@@ -70,6 +70,7 @@ module Network_config = struct
           [@to_yojson fun j -> `String (Yojson.Safe.to_string j)]
     ; block_producer_configs: block_producer_config list
     ; archive_node_count: int
+    ; mina_archive_schema: string
     ; snark_worker_replicas: int
     ; snark_worker_fee: string
     ; snark_worker_public_key: string }
@@ -230,6 +231,9 @@ module Network_config = struct
       ; private_key= keypair.private_key_file
       ; libp2p_secret= "" }
     in
+    let mina_archive_schema =
+      "https://raw.githubusercontent.com/MinaProtocol/mina/develop/src/app/archive/create_schema.sql"
+    in
     (* NETWORK CONFIG *)
     { coda_automation_location= cli_inputs.coda_automation_location
     ; keypairs= block_producer_keypairs
@@ -248,6 +252,7 @@ module Network_config = struct
         ; block_producer_configs=
             List.mapi block_producer_keypairs ~f:block_producer_config
         ; archive_node_count= num_archive_nodes
+        ; mina_archive_schema
         ; snark_worker_replicas= num_snark_workers
         ; snark_worker_public_key
         ; snark_worker_fee } }
