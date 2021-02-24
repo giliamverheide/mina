@@ -22,6 +22,18 @@ module Node = struct
     Format.sprintf "[ %s ]"
       (String.concat ~sep:",  " (List.map nl ~f:node_to_string))
 
+  let run_in_postgresql_container node ~n ~cmd =
+    let base_args = base_kube_args node in
+    let base_kube_cmd = "kubectl " ^ String.concat ~sep:" " base_args in
+    let kubectl_cmd =
+      Printf.sprintf
+        "%s -c archive-node-%d-postgresql exec -i \
+         archive-node-%d-postgresql-0 -- %s"
+        base_kube_cmd n n cmd
+    in
+    let%bind cwd = Unix.getcwd () in
+    Cmd_util.run_cmd_exn cwd "sh" ["-c"; kubectl_cmd]
+
   let run_in_container node cmd =
     let base_args = base_kube_args node in
     let base_kube_cmd = "kubectl " ^ String.concat ~sep:" " base_args in
@@ -49,6 +61,7 @@ module Node = struct
     Deferred.bind ~f:Malleable_error.return (run_in_container node "./stop.sh")
 
   let get_pod_name t : string Malleable_error.t =
+    Format.eprintf "POD: %s@." t.pod_id ;
     let args =
       List.append (base_kube_args t)
         [ "get"
@@ -58,6 +71,8 @@ module Node = struct
         ; "-o=custom-columns=NAME:.metadata.name"
         ; "--no-headers" ]
     in
+    List.iter args ~f:(Format.eprintf "%s ") ;
+    Format.eprintf "@." ;
     let%bind run_result =
       Deferred.bind ~f:Malleable_error.of_or_error_hard
         (Process.run_lines ~prog:"kubectl" ~args ())
@@ -360,20 +375,17 @@ module Node = struct
     ()
 
   let dump_archive_data ~logger (t : t) ~data_file =
-    [%log info] "Setup port forwarding for Postgresql" ;
-    Deferred.don't_wait_for (Postgresql.set_port_forwarding_exn ~logger t) ;
-    [%log info] "Collecting archive data" ;
-    let args = ["--create"; "--no-owner"; "--dbname"; "archiver"] in
-    let%bind.Deferred.Let_syntax () = after (Time.Span.of_sec 5.) in
-    let%map.Malleable_error.Let_syntax sql_lines =
-      let%bind.Deferred.Let_syntax sql_lines_or_error =
-        Process.run_lines ~prog:"pg_dump" ~args ()
-      in
-      Malleable_error.of_or_error_hard sql_lines_or_error
+    let open Malleable_error.Let_syntax in
+    let%map dump =
+      Deferred.bind ~f:Malleable_error.return
+        (run_in_postgresql_container t ~n:1
+           ~cmd:
+             "pg_dump --create --no-owner \
+              postgres://postgres:foobar@localhost:5432/archive")
     in
     [%log info] "Dumping archive data to file %s" data_file ;
     Out_channel.with_file data_file ~f:(fun out_ch ->
-        Out_channel.output_lines out_ch sql_lines )
+        Out_channel.output_string out_ch dump )
 end
 
 type t =

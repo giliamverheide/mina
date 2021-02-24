@@ -28,21 +28,18 @@ module Make (Inputs : Intf.Test.Inputs_intf) = struct
   let expected_error_event_reprs = []
 
   (* number of minutes to let the network run, after initialization *)
-  let runtime_min = 15.
+  let runtime_min = 10.
 
   let run network t =
     let open Malleable_error.Let_syntax in
     let logger = Logger.create () in
+    let archive_node = List.hd_exn @@ Network.archive_nodes network in
+    (* waiting for archive_node does not seem to work *)
     let block_producers = Network.block_producers network in
     [%log info] "archive node test: waiting for block producers to initialize" ;
     let%bind () =
       Malleable_error.List.iter block_producers ~f:(fun bp ->
           wait_for t (Wait_condition.node_to_initialize bp) )
-    in
-    [%log info] "archive node test: waiting for archive node to initialize" ;
-    let archive_node = List.hd_exn @@ Network.archive_nodes network in
-    let%bind () =
-      wait_for t (Wait_condition.node_to_initialize archive_node)
     in
     [%log info] "archive node test: running network for %0.1f minutes"
       runtime_min ;

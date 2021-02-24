@@ -243,7 +243,7 @@ module Network_config = struct
         ; coda_agent_image= images.user_agent
         ; coda_bots_image= images.bots
         ; coda_points_image= images.points
-        ; coda_archive_image= ""
+        ; coda_archive_image= images.archive_node
         ; runtime_config= Runtime_config.to_yojson runtime_config
         ; block_producer_configs=
             List.mapi block_producer_keypairs ~f:block_producer_config
@@ -390,7 +390,8 @@ module Network_manager = struct
     in
     let nodes_by_app_id =
       let all_nodes =
-        seed_nodes @ snark_coordinator_nodes @ block_producer_nodes @ archive_nodes
+        seed_nodes @ snark_coordinator_nodes @ block_producer_nodes
+        @ archive_nodes
       in
       all_nodes
       |> List.map ~f:(fun node -> (node.pod_id, node))

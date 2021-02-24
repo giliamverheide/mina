@@ -30,6 +30,7 @@ type inputs =
   { test_inputs: test_inputs_with_cli_inputs
   ; test: test
   ; coda_image: string
+  ; archiver_image: string
   ; debug: bool }
 
 let engines : engine list =
@@ -204,6 +205,7 @@ let main inputs =
   let logger = Logger.create () in
   let images =
     { Test_config.Container_images.coda= inputs.coda_image
+    ; archive_node= inputs.archiver_image
     ; user_agent= "codaprotocol/coda-user-agent:0.1.5"
     ; bots= "codaprotocol/coda-bots:0.0.13-beta-1"
     ; points= "codaprotocol/coda-points-hack:32b.4" }
@@ -329,6 +331,14 @@ let coda_image_arg =
     & opt (some string) None
     & info ["coda-image"] ~env ~docv:"CODA_IMAGE" ~doc)
 
+let archiver_image_arg =
+  let doc = "Identifier of the archive node docker image to test." in
+  let env = Arg.env_var "ARCHIVER_IMAGE" ~doc in
+  Arg.(
+    required
+    & opt (some string) None
+    & info ["archiver-image"] ~env ~docv:"ARCHIVER_IMAGE" ~doc)
+
 let debug_arg =
   let doc =
     "Enable debug mode. On failure, the test executive will pause for user \
@@ -351,12 +361,12 @@ let engine_cmd ((engine_name, (module Engine)) : engine) =
     Term.(const wrap_cli_inputs $ Engine.Network_config.Cli_inputs.term)
   in
   let inputs_term =
-    let cons_inputs test_inputs test coda_image debug =
-      {test_inputs; test; coda_image; debug}
+    let cons_inputs test_inputs test coda_image archiver_image debug =
+      {test_inputs; test; coda_image; archiver_image; debug}
     in
     Term.(
       const cons_inputs $ test_inputs_with_cli_inputs_arg $ test_arg
-      $ coda_image_arg $ debug_arg)
+      $ coda_image_arg $ archiver_image_arg $ debug_arg)
   in
   let term = Term.(const start $ inputs_term) in
   (term, info)
