@@ -34,6 +34,21 @@ module Node = struct
     let%bind cwd = Unix.getcwd () in
     Cmd_util.run_cmd_exn cwd "sh" ["-c"; kubectl_cmd]
 
+  let get_logs_in_container container node =
+    let base_args = base_kube_args node in
+    let base_kube_cmd = "kubectl " ^ String.concat ~sep:" " base_args in
+    let pod_cmd =
+      sprintf "%s get pod -l \"app=%s\" -o name" base_kube_cmd node.pod_id
+    in
+    let%bind cwd = Unix.getcwd () in
+    let%bind pod = Cmd_util.run_cmd_exn cwd "sh" ["-c"; pod_cmd] in
+    let kubectl_cmd =
+      Printf.sprintf "%s logs -c %s -n %s %s" base_kube_cmd container
+        node.namespace pod
+    in
+    Format.eprintf "CMD: %s@." kubectl_cmd ;
+    Cmd_util.run_cmd_exn cwd "sh" ["-c"; kubectl_cmd]
+
   let run_in_container node cmd =
     let base_args = base_kube_args node in
     let base_kube_cmd = "kubectl " ^ String.concat ~sep:" " base_args in
@@ -42,23 +57,24 @@ module Node = struct
         "%s -c coda exec -i $( %s get pod -l \"app=%s\" -o name) -- %s"
         base_kube_cmd base_kube_cmd node.pod_id cmd
     in
-    let%bind cwd = Unix.getcwd () in
-    let%map _ = Cmd_util.run_cmd_exn cwd "sh" ["-c"; kubectl_cmd] in
-    ()
+    let%bind.Deferred.Let_syntax cwd = Unix.getcwd () in
+    Malleable_error.return (Cmd_util.run_cmd_exn cwd "sh" ["-c"; kubectl_cmd])
 
   let start ~fresh_state node : unit Malleable_error.t =
     let open Malleable_error.Let_syntax in
     let%bind () =
       if fresh_state then
-        Deferred.bind ~f:Malleable_error.return
-          (run_in_container node "rm -rf .coda-config")
+        let%bind _ = run_in_container node "rm -rf .coda-config" in
+        Malleable_error.return ()
       else Malleable_error.return ()
     in
-    Deferred.bind ~f:Malleable_error.return
-      (run_in_container node "./start.sh")
+    let%bind _ = run_in_container node "./start.sh" in
+    Malleable_error.return ()
 
   let stop node =
-    Deferred.bind ~f:Malleable_error.return (run_in_container node "./stop.sh")
+    let open Malleable_error.Let_syntax in
+    let%bind _ = run_in_container node "./stop.sh" in
+    Malleable_error.return ()
 
   let get_pod_name t : string Malleable_error.t =
     Format.eprintf "POD: %s@." t.pod_id ;
@@ -376,7 +392,7 @@ module Node = struct
 
   let dump_archive_data ~logger (t : t) ~data_file =
     let open Malleable_error.Let_syntax in
-    let%map dump =
+    let%map data =
       Deferred.bind ~f:Malleable_error.return
         (run_in_postgresql_container t ~n:1
            ~cmd:
@@ -385,7 +401,69 @@ module Node = struct
     in
     [%log info] "Dumping archive data to file %s" data_file ;
     Out_channel.with_file data_file ~f:(fun out_ch ->
-        Out_channel.output_string out_ch dump )
+        Out_channel.output_string out_ch data )
+
+  let dump_container_logs ~logger (t : t) ~log_file =
+    let open Malleable_error.Let_syntax in
+    let%map logs =
+      Deferred.bind ~f:Malleable_error.return (get_logs_in_container "coda" t)
+    in
+    [%log info] "Dumping container log to file %s" log_file ;
+    Out_channel.with_file log_file ~f:(fun out_ch ->
+        Out_channel.output_string out_ch logs )
+
+  let dump_precomputed_blocks ~logger (t : t) =
+    let open Malleable_error.Let_syntax in
+    [%log info] "Dumping precomputed blocks from logs for node %s" t.pod_id ;
+    let%map logs =
+      Deferred.bind ~f:Malleable_error.return (get_logs_in_container "coda" t)
+    in
+    let log_lines = String.split logs ~on:'\n' in
+    let jsons = List.map log_lines ~f:Yojson.Safe.from_string in
+    let metadata_jsons =
+      List.map jsons ~f:(fun json ->
+          match json with
+          | `Assoc items -> (
+            match List.Assoc.find items ~equal:String.equal "metadata" with
+            | Some md ->
+                md
+            | None ->
+                failwithf "Log line is missing metadata: %s"
+                  (Yojson.Safe.to_string json)
+                  () )
+          | other ->
+              failwithf "Expected log line to be a JSON record, got: %s"
+                (Yojson.Safe.to_string other)
+                () )
+    in
+    let state_hash_and_blocks =
+      List.fold metadata_jsons ~init:[] ~f:(fun acc json ->
+          match json with
+          | `Assoc items -> (
+            match
+              List.Assoc.find items ~equal:String.equal "precomputed_block"
+            with
+            | Some block -> (
+              match List.Assoc.find items ~equal:String.equal "state_hash" with
+              | Some hash ->
+                  (hash, block) :: acc
+              | None ->
+                  failwith
+                    "Log metadata contains a precomputed block, but no state \
+                     hash" )
+            | None ->
+                acc )
+          | other ->
+              failwithf "Expected log line to be a JSON record, got: %s"
+                (Yojson.Safe.to_string other)
+                () )
+    in
+    List.iter state_hash_and_blocks ~f:(fun (state_hash_json, block_json) ->
+        let state_hash = Yojson.Safe.to_string state_hash_json in
+        let block = Yojson.Safe.to_string block_json in
+        [%log info] "Dumping precomputed block with state hash %s" state_hash ;
+        Out_channel.with_file (state_hash ^ ".json") ~f:(fun out_ch ->
+            Out_channel.output_string out_ch block ) )
 end
 
 type t =

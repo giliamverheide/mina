@@ -34,8 +34,21 @@ module Make (Inputs : Intf.Test.Inputs_intf) = struct
     let open Malleable_error.Let_syntax in
     let logger = Logger.create () in
     let archive_node = List.hd_exn @@ Network.archive_nodes network in
-    (* waiting for archive_node does not seem to work *)
     let block_producers = Network.block_producers network in
+    let%bind.Async.Deferred.Let_syntax () =
+      Async.after (Time.Span.of_sec 150.)
+    in
+    let%bind () =
+      Malleable_error.List.iteri block_producers ~f:(fun n (bp : node) ->
+          let log_file = sprintf "archiver-block-producer-%d.log" n in
+          Network.Node.dump_container_logs ~logger bp ~log_file )
+    in
+    let%bind () =
+      Network.Node.dump_archive_data ~logger archive_node
+        ~data_file:"archiver.sql"
+    in
+    let _ = Core_kernel.exit 1 in
+    (* waiting for archive_node does not seem to work *)
     [%log info] "archive node test: waiting for block producers to initialize" ;
     let%bind () =
       Malleable_error.List.iter block_producers ~f:(fun bp ->
@@ -47,9 +60,14 @@ module Make (Inputs : Intf.Test.Inputs_intf) = struct
       Async.after (Time.Span.of_min runtime_min)
     in
     [%log info] "archive node test: done running network" ;
-    let%map () =
+    let%bind () =
       Network.Node.dump_archive_data ~logger archive_node
         ~data_file:"archiver.sql"
+    in
+    [%log info] "archive node test: collecting block logs" ;
+    let%map () =
+      Malleable_error.List.iter block_producers ~f:(fun bp ->
+          Network.Node.dump_precomputed_blocks ~logger bp )
     in
     [%log info] "archive node test: succesfully completed"
 end
